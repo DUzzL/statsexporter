@@ -32,10 +32,12 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * The snapshot is recomputed on a fixed schedule (every cacheIntervalMinutes)
  * and HTTP requests serve the cached, pre-encoded JSON bytes. All of the
- * mod's own work — JSON serialization, encoding, request handling — runs on
- * daemon threads at {@link Thread#MIN_PRIORITY} so it yields to the server
- * threads under CPU contention. The only step that runs on the server thread
- * is the scoreboard snapshot copy itself (see
+ * mod's own work — binding the port, JSON serialization, encoding, request
+ * handling — runs on daemon threads demoted to the lowest scheduling
+ * priority the OS offers ({@link ThreadDemotion}: SCHED_IDLE + nice 19 on
+ * Linux, {@link Thread#MIN_PRIORITY} elsewhere), so it only runs on CPU time
+ * the server threads don't want. The only step that runs on the server
+ * thread is the scoreboard snapshot copy itself (see
  * {@link ScoreboardReader#snapshot()}), which is required for thread safety
  * and costs well under a millisecond.
  *
@@ -68,8 +70,10 @@ public final class StatsHttpServer {
     private final AtomicLong rateWindow = new AtomicLong(Long.MIN_VALUE);
     private final AtomicInteger requestCounter = new AtomicInteger(0);
 
-    private HttpServer server;
-    private ExecutorService httpPool;
+    // Written on the scheduler thread (startHttpServer), read in stop() on
+    // the server thread — hence volatile.
+    private volatile HttpServer server;
+    private volatile ExecutorService httpPool;
     private ScheduledExecutorService scheduler;
 
     StatsHttpServer(StatsConfig config, ScoreboardReader reader) {
@@ -79,34 +83,50 @@ public final class StatsHttpServer {
 
     /** Start the HTTP server and schedule the periodic cache refresh. */
     void start() {
-        // Serve a valid empty snapshot until the first refresh lands; the
-        // first refresh itself runs asynchronously (below) so server startup
-        // is never blocked on a scoreboard read.
+        // Serve a valid empty snapshot until the first refresh lands.
         cachedBody.set(buildJson(Map.of()).getBytes(StandardCharsets.UTF_8));
 
+        // Everything else — binding the port included — happens on the
+        // demoted scheduler thread, so server startup is never blocked and
+        // the threads the JDK HttpServer spawns internally (dispatcher,
+        // timer) inherit the demoted OS scheduling of their creating thread.
+        scheduler = Executors.newSingleThreadScheduledExecutor(lowPriorityFactory("statsexporter-cache"));
+        scheduler.execute(this::startHttpServer);
+
+        // Refresh the cache right after startup, then again after every
+        // configured interval. Fixed delay rather than fixed rate: the
+        // refresh thread runs at idle priority and may be starved on a busy
+        // host, and catch-up runs of a cache refresh are never useful.
+        scheduler.scheduleWithFixedDelay(this::refreshCache, 0,
+                config.cacheIntervalMinutes(), TimeUnit.MINUTES);
+
+        LOGGER.info("Stats cache will refresh every {} minute(s)", config.cacheIntervalMinutes());
+    }
+
+    /** Bind and start the embedded HTTP server. Runs on the demoted cache thread. */
+    private void startHttpServer() {
+        HttpServer httpServer;
         try {
-            server = HttpServer.create(new InetSocketAddress(config.port()), 0);
+            httpServer = HttpServer.create(new InetSocketAddress(config.port()), 0);
         } catch (IOException e) {
             LOGGER.error("Failed to bind Stats Exporter HTTP server on port {}: {}", config.port(), e.getMessage());
             LOGGER.error("Make sure the port is open as an additional allocation in your Pterodactyl/Folium panel.");
             return;
         }
 
-        server.createContext("/api/stats", new StatsHandler());
+        httpServer.createContext("/api/stats", new StatsHandler());
         httpPool = Executors.newFixedThreadPool(2, lowPriorityFactory("statsexporter-http"));
-        server.setExecutor(httpPool);
-        server.start();
+        httpServer.setExecutor(httpPool);
+        httpServer.start();
+        server = httpServer;
+
+        // If the mod was stopped while we were binding, close what we just
+        // opened instead of leaking it.
+        if (scheduler.isShutdown()) {
+            stop();
+            return;
+        }
         LOGGER.info("Stats Exporter HTTP server listening on port {} (endpoint: GET /api/stats)", config.port());
-
-        // Refresh the cache now, then again after every configured interval.
-        // Fixed delay rather than fixed rate: the refresh thread runs at
-        // minimum priority and may be starved on a busy host, and catch-up
-        // runs of a cache refresh are never useful.
-        scheduler = Executors.newSingleThreadScheduledExecutor(lowPriorityFactory("statsexporter-cache"));
-        scheduler.scheduleWithFixedDelay(this::refreshCache, 0,
-                config.cacheIntervalMinutes(), TimeUnit.MINUTES);
-
-        LOGGER.info("Stats cache will refresh every {} minute(s)", config.cacheIntervalMinutes());
     }
 
     /** Stop the HTTP server, its worker pool and the cache scheduler. */
@@ -125,16 +145,19 @@ public final class StatsHttpServer {
     }
 
     /**
-     * All threads owned by the mod are daemon threads at minimum priority so
-     * they never keep the JVM alive and always lose CPU contention against
-     * the server threads. (On Linux the JVM only honors thread priorities
-     * when started with -XX:ThreadPriorityPolicy=1 — see the "Performance
-     * notes" section of the README.)
+     * All threads owned by the mod are daemon threads (never keep the JVM
+     * alive) at the lowest priority available: each demotes itself via
+     * {@link ThreadDemotion} as its first action (SCHED_IDLE + nice 19 on
+     * Linux — no JVM flags needed), with {@link Thread#MIN_PRIORITY} as the
+     * portable baseline (honored natively on Windows).
      */
     private static ThreadFactory lowPriorityFactory(String baseName) {
         AtomicInteger count = new AtomicInteger(1);
         return runnable -> {
-            Thread thread = new Thread(runnable, baseName + "-" + count.getAndIncrement());
+            Thread thread = new Thread(() -> {
+                ThreadDemotion.demoteCurrentThread();
+                runnable.run();
+            }, baseName + "-" + count.getAndIncrement());
             thread.setDaemon(true);
             thread.setPriority(Thread.MIN_PRIORITY);
             return thread;
