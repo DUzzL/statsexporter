@@ -16,6 +16,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Reads player statistics directly from the running server's in-memory
@@ -28,6 +29,12 @@ import java.util.Set;
  * The objectives to expose are configurable via {@link StatsConfig#objectives()}.
  * If {@link StatsConfig#hideBannedPlayers()} is true, banned players are
  * excluded from the result.
+ *
+ * Thread safety: the scoreboard and the ban list are mutated by the server
+ * thread, so they may only be read from the server thread. {@link #snapshot()}
+ * takes care of that — it copies the scores into a plain map on the server
+ * thread and hands the copy to the caller, which can then do all expensive
+ * work (JSON serialization) on its own thread.
  */
 public final class ScoreboardReader {
 
@@ -42,12 +49,39 @@ public final class ScoreboardReader {
     }
 
     /**
+     * Snapshot the configured objectives into a plain map, running the actual
+     * scoreboard read on the server thread (the only thread that may touch
+     * live server data). The read is a cheap copy of player names and int
+     * scores, so the time spent on the server thread is negligible — well
+     * under a millisecond even for thousands of tracked players.
+     *
+     * If called on the server thread itself, {@code server.execute} runs the
+     * task inline and the returned future is already complete.
+     *
+     * @return a future completed on the server thread with the copied stats;
+     *         the map is exclusively owned by the caller
+     */
+    CompletableFuture<Map<String, PlayerStats>> snapshot() {
+        CompletableFuture<Map<String, PlayerStats>> future = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                future.complete(read());
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
+        return future;
+    }
+
+    /**
      * Build a map of player name -> stats for all players that have at least
      * one of the configured objectives set.
      *
+     * Must run on the server thread — use {@link #snapshot()} from anywhere else.
+     *
      * @return an ordered map (player name -> stats); empty if no data exists
      */
-    Map<String, PlayerStats> read() {
+    private Map<String, PlayerStats> read() {
         Map<String, PlayerStats> result = new LinkedHashMap<>();
         Scoreboard scoreboard = server.getScoreboard();
         if (scoreboard == null) {

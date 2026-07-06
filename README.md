@@ -14,6 +14,8 @@ NBT, because it runs server-side and has direct in-memory access.
 - Optionally hides banned players from the response.
 - CORS-restricted to your website's origin.
 - Cached snapshot — recomputed every 5–15 minutes, served cheaply per request.
+- Fully asynchronous — all refresh/serving work runs on minimum-priority
+  daemon threads; the server thread only does a sub-millisecond snapshot copy.
 - Simple rate limiting (30 requests/second).
 - No dependencies beyond Fabric API.
 
@@ -261,6 +263,34 @@ Requirements: Java 25, Gradle (the wrapper is included).
 ```
 
 The built jar is at `build/libs/statsexporter-<version>.jar`.
+
+---
+
+## Performance notes
+
+All of the mod's own work (JSON serialization, encoding, HTTP request
+handling) runs on daemon threads at minimum thread priority
+(`Thread.MIN_PRIORITY`), so under CPU contention it yields to the server
+threads. The only thing executed on the server thread is the scoreboard
+snapshot itself — a plain copy of player names and scores, sub-millisecond
+even for thousands of players — because live server data may only be touched
+safely from the server thread. Responses are served from pre-encoded bytes,
+so requests allocate almost nothing.
+
+**Linux note:** by default the JVM *ignores* Java thread priorities on Linux.
+To make the OS actually schedule the mod's threads below the server threads,
+add these flags to your JVM startup arguments (in Pterodactyl: **Startup**
+→ JVM arguments):
+
+```
+-XX:ThreadPriorityPolicy=1 -XX:JavaPriority1_To_OSPriority=19
+```
+
+With these flags the mod's threads run at `nice 19` (the lowest CPU
+priority); server threads are unaffected. Lowering priorities does not
+require root on any recent JDK. Without the flags the mod still behaves
+well — the refresh is cheap and fully asynchronous — the flags just add an
+OS-level guarantee on busy hosts.
 
 ---
 
