@@ -10,7 +10,7 @@ edits `scoreboard.dat`.
 
 ## What players and admins get
 
-- A built-in statistics website at `/`
+- A built-in statistics website.
 - A sortable player table and headline values
 - A TOML config with comments for every setting
 - A JSON API at `/api/stats` for anyone who wants to build their own site
