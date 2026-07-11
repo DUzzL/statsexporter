@@ -1,4 +1,4 @@
-package com.example;
+package de.duzzl.statsexporter;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.players.NameAndId;

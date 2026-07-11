@@ -30,6 +30,9 @@ dependencies {
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	include(implementation("org.tomlj:tomlj:1.1.1"))
+	include(implementation("org.antlr:antlr4-runtime:4.11.1"))
+	include(implementation("org.checkerframework:checker-qual:3.21.2"))
 }
 
 processResources {

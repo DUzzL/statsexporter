@@ -1,4 +1,4 @@
-package com.example;
+package de.duzzl.statsexporter;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -10,8 +10,7 @@ import java.nio.file.Path;
 
 /**
  * Stats Exporter — a server-side Fabric mod that exposes player scoreboard
- * statistics (bac_advancements, hc_playTimeShow) over a lightweight embedded
- * HTTP endpoint, so the xaprosmp.xyz website can render a Statistics tab.
+ * statistics over a lightweight embedded HTTP endpoint and bundled dashboard.
  *
  * The mod does not run on the client (see fabric.mod.json environment=server).
  */

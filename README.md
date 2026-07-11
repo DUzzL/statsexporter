@@ -1,171 +1,127 @@
 # Stats Exporter
 
-A server-side Fabric mod for Minecraft 26.2 that exposes player scoreboard
-statistics over a lightweight HTTP endpoint, so a website can render a
-statistics page.
+Stats Exporter is a server-side Fabric mod. It turns chosen
+scoreboard objectives into a clean statistics page that is served by your
+Minecraft server. Install the mod, choose the objectives, and open the page.
+You do not need to build a website, although it is am option.
 
-The mod reads the scoreboard **live from the running server** via
-`MinecraftServer#getScoreboard()` — it does **not** parse `scoreboard.dat` as
-NBT, because it runs server-side and has direct in-memory access.
+The mod reads the live scoreboard from the running server. It never reads or
+edits `scoreboard.dat`.
 
-## Features
+## What players and admins get
 
-- Exposes any scoreboard objectives you choose (configurable).
-- Optionally hides banned players from the response.
-- CORS-restricted to your website's origin.
-- Cached snapshot — recomputed every 5–15 minutes, served cheaply per request.
-- Fully asynchronous — all refresh/serving work runs on idle-priority daemon
-  threads (`SCHED_IDLE` on Linux, no JVM flags needed); the server thread
-  only does a sub-millisecond snapshot copy.
-- Simple rate limiting (30 requests/second).
-- No dependencies beyond Fabric API.
+- A built-in statistics website at `/`
+- A sortable player table and headline values
+- A TOML config with comments for every setting
+- A JSON API at `/api/stats` for anyone who wants to build their own site
+- Optional filtering of banned players
+- Cached responses and a small request limit to keep the endpoint performant.
 
----
+## Quick start: use the built-in website
 
-## Installation
+1. Download the release jar and put it in your server's `mods` folder.
+2. Open up a new port! Often this is under the Network tab of your panel.
+2. Start the server once. It creates `config/statsexporter.toml`.
+3. Open that file and set the port plus the scoreboard objectives you want to
+   show.
+4. Restart the server.
+5. Open `http://your-server-address:the-port/` in a browser.
 
-1. Download the latest release `.jar` (or build from source — see below).
-2. Drop the jar into your server's `mods/` folder.
-3. Start (or restart) the server. The mod creates a default config file at
-   `config/statsexporter.json`.
-4. Edit the config (see below) and restart the server.
+This is enough for testing on your own network. If you want to share the page
+publicly, continue with [Put it behind HTTPS](#put-it-behind-https).
 
----
+### Example configuration
 
-## Configuration
+The generated `statsexporter.toml` explains the same options with comments.
+This is a complete example:
 
-The config file is created automatically at
-`<server>/config/statsexporter.json` on first launch. It is plain JSON (no
-comments — see this README for documentation of each field).
+```toml
+# The port for both the dashboard and /api/stats.
+port = 8790
 
-| Key                    | Type    | Default      | Notes                                              |
-|------------------------|---------|--------------|----------------------------------------------------|
-| `port`                 | int/string | `"your_port"` | Port the HTTP server listens on. Replace with a real port number (e.g. `8790`). |
-| `cacheIntervalMinutes` | int     | `10`         | How often the stats snapshot is recomputed. Clamped to **5–15**. |
-| `allowedOrigin`        | string  | `*`          | Origin allowed via CORS (`Access-Control-Allow-Origin`). Set to your website's origin, e.g. `https://example.com`. `*` allows any origin (not recommended for production). |
-| `objectives`           | array   | `[]`         | List of scoreboard objective names to expose. Each becomes a field in the JSON response. |
-| `hideBannedPlayers`    | bool    | `false`      | If `true`, banned players are excluded from the JSON response. |
+# The cache refresh interval. It must be between 5 and 15 minutes.
+cacheIntervalMinutes = 10
 
-Example:
+# Keep this as "*" when you only use the included page. If you build another
+# website, put that website's full origin here instead.
+allowedOrigin = "*"
 
-```json
-{
-  "port": 8790,
-  "cacheIntervalMinutes": 10,
-  "allowedOrigin": "https://example.com",
-  "objectives": ["bac_advancements", "hc_playTimeShow", "deathCount"],
-  "hideBannedPlayers": true
-}
+# Names from /scoreboard objectives list.
+objectives = ["kills", "deaths", "playtime"]
+
+# Hide banned players everywhere.
+hideBannedPlayers = true
+
+[dashboard]
+# The heading shown on the built-in page.
+title = "My Server Statistics"
+
+# An empty list shows every exported objective.
+visibleObjectives = ["kills", "playtime"]
+
+# The player ranking starts with the highest kill count.
+sortBy = "kills"
+sortDirection = "desc"
+
+[dashboard.labels]
+# Optional names that look nicer than scoreboard IDs.
+kills = "Kills"
+playtime = "Play time"
 ```
 
-### Finding your scoreboard objective names
-
-To see which objectives exist on your server, run in the server console:
+To find objective names, run this in the server console:
 
 ```
 /scoreboard objectives list
 ```
+To get more scoreboard data, I recommend the Track Statistics datapack from
+Vanilla Tweaks!
+Use the name in square brackets in the `objectives` list. The mod only exports
+objectives listed there.
 
-This prints lines like `[bac_advancements]` — use the name in brackets as an
-entry in the `objectives` array.
+### Dashboard settings
 
----
+`objectives` controls what the mod reads and exposes. `visibleObjectives`
+controls what the included website displays. This means you can export a
+statistic for a custom integration without showing it on the public page.
 
-## HTTP API
+Set `visibleObjectives = []` to display all exported objectives. If `sortBy`
+is empty, players are sorted by name. Labels are optional.
 
-### `GET /api/stats`
+## Put it behind HTTPS (Optional)
 
-Returns the cached stats snapshot as JSON. The snapshot is recomputed every
-`cacheIntervalMinutes`; requests always serve the cached copy to stay cheap.
+The mod itself serves plain HTTP. Many browsers and visitors expect a public page to
+use HTTPS, so put a reverse proxy in front of it. Cloudflare Workers is a good
+option.
 
-**200 response:**
-
-```json
-{
-  "lastUpdated": "2026-07-04T14:00:00Z",
-  "players": [
-    {
-      "name": "Steve",
-      "bac_advancements": 42,
-      "hc_playTimeShow": 128394
-    }
-  ]
-}
-```
-
-- `lastUpdated` — ISO-8601 UTC timestamp of the last cache refresh.
-- `players` — array of player objects. **Empty array** when the scoreboard
-  has no data yet (the endpoint never errors for missing data).
-- Each player object contains a `name` field plus one field per configured
-  objective (the objective name as key, the score as integer value).
-
-CORS headers are sent on every response:
-
-```
-Access-Control-Allow-Origin: <allowedOrigin>
-Access-Control-Allow-Methods: GET, OPTIONS
-Access-Control-Allow-Headers: Content-Type
-Access-Control-Max-Age: 600
-```
-
-`OPTIONS` requests are answered with `204 No Content` for CORS preflight.
-
----
-
-## Deployment: exposing the endpoint over HTTPS
-
-The mod's HTTP server runs on plain HTTP. Since most websites are served over
-HTTPS, browsers will block a plain-HTTP fetch (mixed content). You need to put
-HTTPS in front of the mod's port and expose it as a public HTTPS URL.
-
-This section walks through the recommended setup using **Cloudflare**, which
-requires no root access and no certificate management.
-
-### Step 1: Open the port on your hosting panel
-
-The mod's `port` must be opened as an **additional allocation** in your
-hosting panel (Pterodactyl, Folium, etc.) — it is separate from the
-Minecraft game port.
-
-1. In your hosting panel, go to **Settings → Allocations** (or **Network**).
-2. Add a new allocation for the port you set in the config (e.g. `8790`).
-3. Note the **public address** of your server node (e.g. `n-nyc-19.folium.host`
-   or the IP address shown in the panel).
-
-Verify the endpoint is reachable from your own machine:
+First add the configured port as an extra allocation in your host panel. This
+is separate from the Minecraft game port. Then test it from your own computer:
 
 ```bash
-curl -i http://<your-server-address>:<port>/api/stats
+curl -i http://your-server-address:8790/
 ```
 
-You should get `200` with JSON. If this times out, the port allocation is not
-public — check your panel settings or ask your host's support.
+You should receive HTML. This checks that the allocation is open before adding
+Cloudflare.
 
-### Step 2: Create a Cloudflare Worker (reverse proxy)
+### Cloudflare Worker
 
-A Cloudflare Worker sits on Cloudflare's edge, terminates HTTPS for you, and
-forwards requests to your server's HTTP port. It's free and requires no server
-access.
-
-1. Go to the [Cloudflare dashboard](https://dash.cloudflare.com/) →
-   **Workers & Pages** → **Create** → **Create Worker**.
-2. Name it (e.g. `stats-proxy`) → click **Deploy**.
-3. Click **Edit code**.
-4. Replace all the code with the following, substituting your server address
-   and port:
+Create a Worker in the Cloudflare dashboard and replace its code with this.
+Set `upstream` to the public hostname and port from your hosting panel. Set
+`allowedOrigin` to the website that should be allowed to call `/api/stats`.
+For the included dashboard, use the Worker or custom-domain URL itself. It
+forwards both the built-in website and the API.
 
 ```js
+const upstream = "http://your-server-address:8790";
+const allowedOrigin = "https://stats.example.com";
+
 export default {
   async fetch(request) {
-    // Forward to the mod's HTTP endpoint on your server.
-    const upstream = "http://<your-server-address>:<port>/api/stats";
+    const url = new URL(request.url);
 
-    // Handle CORS preflight.
     if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders(),
-      });
+      return new Response(null, { status: 204, headers: corsHeaders() });
     }
 
     if (request.method !== "GET") {
@@ -173,152 +129,103 @@ export default {
     }
 
     try {
-      const r = await fetch(upstream, { cache: "no-store" });
-      const body = await r.text();
-      return new Response(body, {
-        status: r.status,
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          ...corsHeaders(),
-        },
+      const response = await fetch(`${upstream}${url.pathname}`, {
+        headers: { "Accept": request.headers.get("Accept") || "*/*" },
+        cache: "no-store"
       });
-    } catch (e) {
-      return new Response(JSON.stringify({ error: "upstream unreachable" }), {
-        status: 502,
-        headers: { "Content-Type": "application/json", ...corsHeaders() },
-      });
+      const headers = new Headers(response.headers);
+      for (const [key, value] of Object.entries(corsHeaders())) headers.set(key, value);
+      return new Response(response.body, { status: response.status, headers });
+    } catch {
+      return new Response("The statistics server is unavailable.", { status: 502 });
     }
-  },
+  }
 };
 
 function corsHeaders() {
   return {
-    "Access-Control-Allow-Origin": "https://your-website.com",
+    "Access-Control-Allow-Origin": allowedOrigin,
     "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Max-Age": "600",
+    "Access-Control-Allow-Headers": "Content-Type"
   };
 }
 ```
 
-5. Replace `<your-server-address>:<port>` with your server's public address
-   and the mod's port (e.g. `http://n-nyc-19.folium.host:8790/api/stats`).
-6. Replace `https://your-website.com` in `corsHeaders()` with your website's
-   origin (the same value as `allowedOrigin` in the mod config).
-7. Click **Save and deploy**.
+Deploy the Worker and open its `workers.dev` URL. The dashboard should load at
+the root URL. You can later attach a custom domain such as
+`https://stats.example.com/` in the Worker's **Settings** under **Domains &
+Routes**.
 
-Test the Worker URL (looks like `stats-proxy.<your-subdomain>.workers.dev`):
+If you use a custom domain, change `allowedOrigin` in both places: the Worker
+code and `config/statsexporter.toml`. For example, the built-in page at
+`https://stats.example.com/` needs this TOML setting:
 
-```bash
-curl -i https://stats-proxy.<your-subdomain>.workers.dev/api/stats
+```toml
+allowedOrigin = "https://stats.example.com"
 ```
 
-You should get `200` with JSON.
+> Cloudflare Workers cannot use a bare IP address on a non-standard port.
+> Use the hostname supplied by your host instead.
 
-> **Note:** Cloudflare Workers cannot fetch bare IP addresses on non-standard
-> ports. Use a hostname (e.g. `n-nyc-19.folium.host`) instead of a raw IP.
-> You can find the hostname by reverse-DNS-looking-up your server's IP, or by
-> checking your hosting panel.
+## Custom websites and the API
 
-### Step 3: Bind a custom domain (optional but recommended)
-
-Instead of the long `*.workers.dev` URL, you can use a clean subdomain like
-`api.your-domain.com`.
-
-1. In Cloudflare, go to your domain → **DNS** → **Records** → **Add record**:
-   - **Type:** `AAAA`
-   - **Name:** `api` (or whatever subdomain you want)
-   - **IPv6 address:** `100::` (Cloudflare's dummy address for Workers)
-   - **Proxy status:** Proxied (orange cloud)
-2. Go to **Workers & Pages** → your worker → **Settings** → **Triggers** →
-   **Add Custom Domain** (or **Routes** → **Add route**):
-   - Route: `api.your-domain.com/*` → Zone: `your-domain.com`
-3. Wait 1–2 minutes for the SSL certificate to be issued.
-
-Test:
-
-```bash
-curl -i https://api.your-domain.com/api/stats
-```
-
-### Step 4: Point your website at the endpoint
-
-In your website's JavaScript, fetch the endpoint:
+The included page is optional. Stats Exporter also exposes the same data at
+`GET /api/stats`, so a website, Discord bot, or another service can use it.
 
 ```js
-const STATS_ENDPOINT = 'https://api.your-domain.com/api/stats';
+const response = await fetch("https://stats.example.com/api/stats");
+const stats = await response.json();
+console.log(stats.players);
 ```
 
-Make sure the `allowedOrigin` in the mod config and the
-`Access-Control-Allow-Origin` in the Worker both match your website's origin
-exactly (e.g. `https://your-website.com` — no trailing slash, no path).
+Example response:
 
----
+```json
+{
+  "lastUpdated": "2026-07-04T14:00:00Z",
+  "players": [
+    { "name": "Steve", "kills": 42, "playtime": 128394 }
+  ],
+  "dashboard": {
+    "title": "My Server Statistics",
+    "visibleObjectives": ["kills", "playtime"],
+    "labels": { "kills": "Kills", "playtime": "Play time" },
+    "sortBy": "kills",
+    "sortDirection": "desc"
+  }
+}
+```
+
+The API response is cached according to `cacheIntervalMinutes`. A browser can
+only call it from origins allowed by `allowedOrigin` in the TOML config. If you
+use the Cloudflare Worker above, set the same origin in its `allowedOrigin`
+constant. Use your custom site's full origin, for example:
+
+```toml
+allowedOrigin = "https://example.com"
+```
+
+Use `*` only when you intentionally want any website to read the API. Server
+requests, bots, and `curl` are not restricted by CORS.
+
 
 ## Building from source
 
-Requirements: Java 25, Gradle (the wrapper is included).
+Java 25 is required. The Gradle wrapper is included:
 
 ```bash
 ./gradlew build
 ```
 
-The built jar is at `build/libs/statsexporter-<version>.jar`.
+The finished jar is in `build/libs/`.
 
----
+## Notes
 
-## Performance notes
-
-All of the mod's own work (JSON serialization, encoding, HTTP request
-handling) runs on daemon threads at the lowest scheduling priority the
-platform offers, so it never competes seriously with the server for CPU. The
-only thing executed on the server thread is the scoreboard snapshot itself —
-a plain copy of player names and scores, sub-millisecond even for thousands
-of players — because live server data may only be touched safely from the
-server thread. Responses are served from pre-encoded bytes, so requests
-allocate almost nothing.
-
-**No JVM flags, root access or extra configuration are needed** — each mod
-thread demotes itself on startup:
-
-- **Linux** (including Pterodactyl/Docker hosts): mod threads move themselves
-  into the kernel's *idle* scheduling class (`SCHED_IDLE`) and to the weakest
-  nice level (19), calling libc directly via the Java FFM API. Idle-class
-  threads only run on CPU time no other thread wants, so the exporter cannot
-  meaningfully take CPU away from the server. Lowering a thread's own
-  priority is always permitted — no privileges needed, works inside
-  containers. Threads created internally by the JDK HTTP server inherit the
-  demotion.
-- **Windows:** the JVM honors `Thread.MIN_PRIORITY` natively.
-- Anywhere the OS-level calls are unavailable or denied, the mod logs what it
-  fell back to and continues with plain Java thread priorities.
-
-On first start the JVM may print a one-time notice like:
-
-```
-WARNING: A restricted method in java.lang.foreign.Linker has been called
-WARNING: ... called by com.example.ThreadDemotion in an unnamed module
-```
-
-This is expected and harmless — it is the JVM flagging any code that calls
-into the OS, and the mod degrades gracefully if such calls are ever blocked.
-You can optionally silence it by adding `--enable-native-access=ALL-UNNAMED`
-to the JVM arguments (purely cosmetic; not required for the demotion to
-work).
-
----
-
-## Assumptions
-
-- **Objective names.** The objective names in the `objectives` config array
-  must match the vanilla scoreboard criteria registered on the server. Use
-  `/scoreboard objectives list` to find them.
-- **Player identity.** The scoreholder's scoreboard name is used as the player
-  name. For offline-mode servers this is the username; for online-mode servers
-  it is also the username (the scoreboard keys on player names, not UUIDs).
-- **Play time unit.** The raw value of a play-time objective depends on how
-  the objective is configured on your server. The mod passes the raw integer
-  through unchanged — your website is responsible for formatting it.
+- The mod is server-side only.
+- Player names come from scoreboard score holders.
+- Play time values are passed through unchanged. Your scoreboard setup decides
+  their unit.
+- The endpoint allows up to 30 requests per second.
 
 ## License
 

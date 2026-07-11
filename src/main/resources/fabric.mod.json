@@ -3,20 +3,20 @@
 	"id": "statsexporter",
 	"version": "${version}",
 	"name": "Stats Exporter",
-	"description": "Server-side mod that exposes player scoreboard statistics (bac_advancements, hc_playTimeShow) over a lightweight HTTP endpoint for the xaprosmp website.",
+	"description": "Server-side scoreboard statistics dashboard with a JSON API for custom integrations.",
 	"authors": [
-		"xaprosmp"
+		"DUzzL"
 	],
 	"contact": {
-		"homepage": "https://xaprosmp.xyz",
-		"sources": "https://xaprosmp.xyz"
+		"homepage": "https://github.com/DUzzL/statsexporter",
+		"sources": "https://github.com/DUzzL/statsexporter"
 	},
 	"license": "CC0-1.0",
 	"icon": "assets/statsexporter/icon.png",
 	"environment": "server",
 	"entrypoints": {
 		"main": [
-			"com.example.StatsExporterMod"
+			"de.duzzl.statsexporter.StatsExporterMod"
 		]
 	},
 	"mixins": [],

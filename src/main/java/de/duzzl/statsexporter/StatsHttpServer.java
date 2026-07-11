@@ -1,4 +1,4 @@
-package com.example;
+package de.duzzl.statsexporter;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -115,6 +116,7 @@ public final class StatsHttpServer {
         }
 
         httpServer.createContext("/api/stats", new StatsHandler());
+        httpServer.createContext("/", new WebHandler());
         httpPool = Executors.newFixedThreadPool(2, lowPriorityFactory("statsexporter-http"));
         httpServer.setExecutor(httpPool);
         httpServer.start();
@@ -206,7 +208,7 @@ public final class StatsHttpServer {
 
         StatsJson root = new StatsJson(
                 DateTimeFormatter.ISO_INSTANT.format(Instant.now()),
-                players);
+                players, config.dashboard());
         return GSON.toJson(root);
     }
 
@@ -289,16 +291,63 @@ public final class StatsHttpServer {
         }
     }
 
+    /** Serves the bundled dashboard. It uses only relative URLs, so no separate website is needed. */
+    private final class WebHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                exchange.sendResponseHeaders(405, -1);
+                exchange.close();
+                return;
+            }
+            String path = exchange.getRequestURI().getPath();
+            String resource = switch (path) {
+                case "/", "/index.html" -> "/assets/statsexporter/web/index.html";
+                case "/styles.css" -> "/assets/statsexporter/web/styles.css";
+                case "/app.js" -> "/assets/statsexporter/web/app.js";
+                default -> null;
+            };
+            if (resource == null) {
+                exchange.sendResponseHeaders(404, -1);
+                exchange.close();
+                return;
+            }
+            try (InputStream input = StatsHttpServer.class.getResourceAsStream(resource)) {
+                if (input == null) {
+                    exchange.sendResponseHeaders(404, -1);
+                    exchange.close();
+                    return;
+                }
+                byte[] body = input.readAllBytes();
+                exchange.getResponseHeaders().set("Content-Type", contentType(resource));
+                exchange.getResponseHeaders().set("Cache-Control", resource.endsWith("index.html") ? "no-cache" : "public, max-age=3600");
+                exchange.sendResponseHeaders(200, body.length);
+                try (OutputStream output = exchange.getResponseBody()) {
+                    output.write(body);
+                }
+            }
+            exchange.close();
+        }
+
+        private String contentType(String resource) {
+            if (resource.endsWith(".css")) return "text/css; charset=utf-8";
+            if (resource.endsWith(".js")) return "application/javascript; charset=utf-8";
+            return "text/html; charset=utf-8";
+        }
+    }
+
     // ── JSON DTOs ──────────────────────────────────────────────────────
 
     /** Top-level JSON object. */
     private static final class StatsJson {
         final String lastUpdated;
         final List<JsonObject> players;
+        final StatsConfig.Dashboard dashboard;
 
-        StatsJson(String lastUpdated, List<JsonObject> players) {
+        StatsJson(String lastUpdated, List<JsonObject> players, StatsConfig.Dashboard dashboard) {
             this.lastUpdated = lastUpdated;
             this.players = players;
+            this.dashboard = dashboard;
         }
     }
 }

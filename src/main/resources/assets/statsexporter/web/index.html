@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f1115">
+  <title>Server Statistics</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header><div class="wrap brand"><span class="mark">◆</span><span id="serverName">Server</span></div></header>
+  <main class="wrap">
+    <section class="hero"><p class="eyebrow">LIVE SCOREBOARD</p><h1 id="title">Server Statistics</h1><p id="updated" class="updated">Loading statistics…</p></section>
+    <section id="summary" class="summary" aria-label="Statistical overview"></section>
+    <section class="table-panel"><div class="table-heading"><h2>Player ranking</h2><span id="playerCount"></span></div><div class="scroll"><table><thead id="head"></thead><tbody id="body"><tr><td>Loading…</td></tr></tbody></table></div></section>
+  </main>
+  <footer><div class="wrap">Powered by Stats Exporter</div></footer>
+  <script src="/app.js"></script>
+</body>
+</html>
