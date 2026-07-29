@@ -27,8 +27,6 @@ edits `scoreboard.dat`.
 4. Restart the server.
 5. Open `http://your-server-address:the-port/` in a browser.
 
-This is enough for testing on your own network. If you want to share the page
-publicly, continue with [Put it behind HTTPS](#put-it-behind-https).
 
 ### Example configuration
 
