@@ -56,8 +56,8 @@ public final class StatsConfig {
                 LOGGER.info("Created documented Stats Exporter config at {}", path);
             }
         } catch (Exception e) {
-            LOGGER.warn("Failed to read Stats Exporter config '{}', using defaults and rewriting: {}", path, e.getMessage());
-            config.writeConfig();
+            LOGGER.warn("Failed to read Stats Exporter config '{}', using defaults and preserving the file: {}", path, e.getMessage());
+            config = new StatsConfig(path);
         }
         LOGGER.info("Stats Exporter config: port={}, cacheIntervalMinutes={}, allowedOrigin='{}', objectives={}, hideBannedPlayers={}", config.port, config.cacheIntervalMinutes, config.allowedOrigin, config.objectives, config.hideBannedPlayers);
         return config;
@@ -67,9 +67,9 @@ public final class StatsConfig {
         TomlParseResult root = Toml.parse(Files.readString(configPath));
         if (root.hasErrors()) throw new IOException(root.errors().toString());
         Long portValue = root.getLong("port");
-        port = validPort(portValue == null ? DEFAULT_PORT : portValue.intValue());
+        port = validPort(portValue == null ? DEFAULT_PORT : portValue);
         Long interval = root.getLong("cacheIntervalMinutes");
-        cacheIntervalMinutes = clamp(interval == null ? DEFAULT_CACHE_INTERVAL_MINUTES : interval.intValue());
+        cacheIntervalMinutes = clamp(interval == null ? DEFAULT_CACHE_INTERVAL_MINUTES : interval);
         allowedOrigin = stringOr(root.getString("allowedOrigin"), DEFAULT_ALLOWED_ORIGIN);
         objectives = stringArray(root.getArray("objectives"));
         Boolean banned = root.getBoolean("hideBannedPlayers");
@@ -141,19 +141,36 @@ public final class StatsConfig {
         return new Dashboard(value.has("title") ? value.get("title").getAsString() : "Server Statistics", value.has("visibleObjectives") ? jsonArray(value.getAsJsonArray("visibleObjectives")) : List.of(), labels, value.has("sortBy") ? value.get("sortBy").getAsString() : "", value.has("sortDirection") && "asc".equalsIgnoreCase(value.get("sortDirection").getAsString()) ? "asc" : "desc");
     }
 
-    private static int parsePort(JsonElement value) { try { return value == null ? DEFAULT_PORT : Integer.parseInt(value.getAsString().trim()); } catch (Exception ignored) { return DEFAULT_PORT; } }
-    private static int validPort(int value) {
-        if (value >= 1 && value <= 65535) return value;
+    private static long parsePort(JsonElement value) { try { return value == null ? DEFAULT_PORT : Long.parseLong(value.getAsString().trim()); } catch (Exception ignored) { return DEFAULT_PORT; } }
+    private static int validPort(long value) {
+        if (value >= 1 && value <= 65535) return (int) value;
         LOGGER.warn("Port {} is outside the valid range 1-65535. Using {} instead.", value, DEFAULT_PORT);
         return DEFAULT_PORT;
     }
-    private static int clamp(int value) { return Math.max(MIN_CACHE_INTERVAL_MINUTES, Math.min(MAX_CACHE_INTERVAL_MINUTES, value)); }
+    private static int clamp(long value) { return (int) Math.max(MIN_CACHE_INTERVAL_MINUTES, Math.min(MAX_CACHE_INTERVAL_MINUTES, value)); }
     private static String stringOr(String value, String fallback) { return value == null || value.isBlank() ? fallback : value.trim(); }
     private static List<String> stringArray(TomlArray values) { List<String> result = new ArrayList<>(); if (values != null) for (int i = 0; i < values.size(); i++) { String value = values.getString(i); if (value != null && !value.isBlank()) result.add(value.trim()); } return result; }
     private static List<String> jsonArray(Iterable<JsonElement> values) { List<String> result = new ArrayList<>(); for (JsonElement value : values) if (!value.getAsString().isBlank()) result.add(value.getAsString().trim()); return result; }
-    private static String quote(String value) { return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""; }
+    private static String quote(String value) {
+        StringBuilder result = new StringBuilder("\"");
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            switch (ch) {
+                case '\\' -> result.append("\\\\");
+                case '"' -> result.append("\\\"");
+                case '\n' -> result.append("\\n");
+                case '\r' -> result.append("\\r");
+                case '\t' -> result.append("\\t");
+                default -> {
+                    if (ch < 0x20 || ch == 0x7f) result.append("\\u%04X".formatted((int) ch));
+                    else result.append(ch);
+                }
+            }
+        }
+        return result.append('"').toString();
+    }
     private static String array(List<String> values) { return "[" + values.stream().map(StatsConfig::quote).collect(Collectors.joining(", ")) + "]"; }
-    private static String labels(Map<String, String> values) { return values.entrySet().stream().map(entry -> entry.getKey() + " = " + quote(entry.getValue())).collect(Collectors.joining("\n")); }
+    private static String labels(Map<String, String> values) { return values.entrySet().stream().map(entry -> quote(entry.getKey()) + " = " + quote(entry.getValue())).collect(Collectors.joining("\n")); }
 
     int port() { return port; }
     int cacheIntervalMinutes() { return cacheIntervalMinutes; }
