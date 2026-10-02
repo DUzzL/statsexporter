@@ -5,6 +5,10 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.tomlj.Toml;
+import org.tomlj.TomlArray;
+import org.tomlj.TomlParseResult;
+import org.tomlj.TomlTable;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -60,16 +64,17 @@ public final class StatsConfig {
     }
 
     private void readToml() throws IOException {
-        Map<String, Object> root = ConfigToml.parse(Files.readString(configPath));
-        Long portValue = longValue(root.get("port"));
+        TomlParseResult root = Toml.parse(Files.readString(configPath));
+        if (root.hasErrors()) throw new IOException(root.errors().toString());
+        Long portValue = root.getLong("port");
         port = validPort(portValue == null ? DEFAULT_PORT : portValue);
-        Long interval = longValue(root.get("cacheIntervalMinutes"));
+        Long interval = root.getLong("cacheIntervalMinutes");
         cacheIntervalMinutes = clamp(interval == null ? DEFAULT_CACHE_INTERVAL_MINUTES : interval);
-        allowedOrigin = stringOr(stringValue(root.get("allowedOrigin")), DEFAULT_ALLOWED_ORIGIN);
-        objectives = stringArray(root.get("objectives"));
-        Boolean banned = booleanValue(root.get("hideBannedPlayers"));
+        allowedOrigin = stringOr(root.getString("allowedOrigin"), DEFAULT_ALLOWED_ORIGIN);
+        objectives = stringArray(root.getArray("objectives"));
+        Boolean banned = root.getBoolean("hideBannedPlayers");
         hideBannedPlayers = banned != null && banned;
-        dashboard = dashboard(tableValue(root.get("dashboard")));
+        dashboard = dashboard(root.getTable("dashboard"));
     }
 
     /** One-time compatibility path; the old JSON is deliberately left untouched. */
@@ -86,7 +91,7 @@ public final class StatsConfig {
     private void writeConfig() {
         String content = """
                 # Stats Exporter configuration
-                # Full setup guide: https://github.com/DUzzL/statsexporter#quick-start-use-the-built-in-website
+                # Full setup guide: https://github.com/DUzzL/statsexporter#configuration
 
                 # HTTP port for the bundled dashboard (/) and JSON API (/api/stats).
                 port = %d
@@ -120,12 +125,12 @@ public final class StatsConfig {
         try { Files.writeString(configPath, content); } catch (IOException e) { LOGGER.warn("Could not write config file '{}': {}", configPath, e.getMessage()); }
     }
 
-    private static Dashboard dashboard(Map<String, Object> table) {
+    private static Dashboard dashboard(TomlTable table) {
         if (table == null) return Dashboard.defaults();
         Map<String, String> labels = new LinkedHashMap<>();
-        Map<String, Object> labelTable = tableValue(table.get("labels"));
-        if (labelTable != null) for (Map.Entry<String, Object> entry : labelTable.entrySet()) { String value = stringValue(entry.getValue()); if (value != null && !value.isBlank()) labels.put(entry.getKey(), value.trim()); }
-        return new Dashboard(stringOr(stringValue(table.get("title")), "Server Statistics"), stringArray(table.get("visibleObjectives")), labels, stringOr(stringValue(table.get("sortBy")), ""), "asc".equalsIgnoreCase(stringValue(table.get("sortDirection"))) ? "asc" : "desc");
+        TomlTable labelTable = table.getTable("labels");
+        if (labelTable != null) for (String key : labelTable.keySet()) { String value = labelTable.getString(key); if (value != null && !value.isBlank()) labels.put(key, value.trim()); }
+        return new Dashboard(stringOr(table.getString("title"), "Server Statistics"), stringArray(table.getArray("visibleObjectives")), labels, stringOr(table.getString("sortBy"), ""), "asc".equalsIgnoreCase(table.getString("sortDirection")) ? "asc" : "desc");
     }
 
     private static Dashboard jsonDashboard(JsonObject root) {
@@ -144,12 +149,7 @@ public final class StatsConfig {
     }
     private static int clamp(long value) { return (int) Math.max(MIN_CACHE_INTERVAL_MINUTES, Math.min(MAX_CACHE_INTERVAL_MINUTES, value)); }
     private static String stringOr(String value, String fallback) { return value == null || value.isBlank() ? fallback : value.trim(); }
-    private static Long longValue(Object value) { return value instanceof Long number ? number : null; }
-    private static Boolean booleanValue(Object value) { return value instanceof Boolean bool ? bool : null; }
-    private static String stringValue(Object value) { return value instanceof String string ? string : null; }
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> tableValue(Object value) { return value instanceof Map<?, ?> ? (Map<String, Object>) value : null; }
-    private static List<String> stringArray(Object values) { List<String> result = new ArrayList<>(); if (values instanceof List<?> list) for (Object item : list) { String value = stringValue(item); if (value != null && !value.isBlank()) result.add(value.trim()); } return result; }
+    private static List<String> stringArray(TomlArray values) { List<String> result = new ArrayList<>(); if (values != null) for (int i = 0; i < values.size(); i++) { String value = values.getString(i); if (value != null && !value.isBlank()) result.add(value.trim()); } return result; }
     private static List<String> jsonArray(Iterable<JsonElement> values) { List<String> result = new ArrayList<>(); for (JsonElement value : values) if (!value.getAsString().isBlank()) result.add(value.getAsString().trim()); return result; }
     private static String quote(String value) {
         StringBuilder result = new StringBuilder("\"");

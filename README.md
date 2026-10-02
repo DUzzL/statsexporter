@@ -3,7 +3,7 @@
 Stats Exporter is a server-side Fabric mod. It turns chosen
 scoreboard objectives into a clean statistics page that is served by your
 Minecraft server. Install the mod, choose the objectives, and open the page.
-You do not need to build a website, although it is an option.
+You do not need to build a website, although it is am option.
 
 The mod reads the live scoreboard from the running server. It never reads or
 edits `scoreboard.dat`.
@@ -20,20 +20,17 @@ edits `scoreboard.dat`.
 ## Quick start: use the built-in website
 
 1. Download the release jar and put it in your server's `mods` folder.
-2. Open up a new port. Often this is under the Network tab of your panel.
-3. Start the server once. It creates `config/statsexporter.toml`.
-4. Open that file and set the port plus the scoreboard objectives you want to
+2. Open up a new port! Often this is under the Network tab of your panel.
+2. Start the server once. It creates `config/statsexporter.toml`.
+3. Open that file and set the port plus the scoreboard objectives you want to
    show.
-5. Restart the server.
-6. Open `http://your-server-address:the-port/` in a browser.
+4. Restart the server.
+5. Open `http://your-server-address:the-port/` in a browser.
 
 
 ### Example configuration
 
 The generated `statsexporter.toml` explains the same options with comments.
-The compact parser supports the settings shown below: section headers, quoted
-strings, integers, booleans, string arrays, and comments. Existing JSON
-configuration files are migrated when no TOML file exists.
 This is a complete example:
 
 ```toml
